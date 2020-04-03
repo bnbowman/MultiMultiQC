@@ -13,6 +13,28 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 
+def _expand_inputs(inputs):
+    # If we already have multiple inputs, use those instead
+    if len(inputs) > 1:
+        return inputs
+
+    # Identify all metric files and samples from the input dir
+    path = inputs[0]
+    files = [f for f in os.listdir(path) if op.isfile(op.join(path, f))]
+    metric_files = [f for f in files if (f.endswith(
+        "metrics.csv") or f.endswith("length_hist.csv"))]
+    samples = list(set(f.split('.')[0] for f in metric_files))
+
+    # Group by sample
+    input_dict = {s: [] for s in samples}
+    for metric in metric_files:
+        sample = metric.split('.')[0]
+        input_dict[sample].append(op.join(path, metric))
+
+    # Return the grouped samples
+    return list(input_dict.values())
+
+
 def _is_exe(fpath):
     """
     Check whether a purported EXE exists and is executable
@@ -37,14 +59,20 @@ def _get_multiqc_arg(multiqc):
     return multiqc
 
 
-def _get_output_dir(input_dir, suffix, outdir):
+def _get_output_dir(inputs, suffix, outdir):
     """
     Format
     """
+    if isinstance(inputs, list):
+        input_dir = inputs[0]
+    else:
+        input_dir = inputs
     if input_dir.endswith("/"):
         input_dir = input_dir[:-1]
     if "/" in input_dir:
         input_dir = input_dir.split("/")[-1]
+    if input_dir.endswith('.csv'):
+        input_dir = input_dir.split(".")[0]
     input_dir += "_" + suffix
     if outdir is None:
         return input_dir
@@ -61,7 +89,11 @@ def _get_subprocess_args(input_arg, outdir_arg, force, multiqc_arg):
     if force:
         args.append("--force")
     args += ["--outdir", outdir_arg]
-    args.append(input_arg)
+
+    if isinstance(input_arg, list):
+        args += input_arg
+    else:
+        args.append(input_arg)
 
     return args
 
@@ -70,10 +102,11 @@ def run(inputs, force, outdir, suffix, multiqc):
     """
     Execute MultiQC over a range of inputs
     """
+    input_args = _expand_inputs(inputs)
     multiqc_arg = _get_multiqc_arg(multiqc)
     logger.info(
         "Using the MultiQC executable located at '{}'".format(multiqc_arg))
-    for input_arg in inputs:
+    for input_arg in input_args:
         logger.info("Setting up MultiQC execution for '{}'".format(input_arg))
         outdir_arg = _get_output_dir(input_arg, suffix, outdir)
         args = _get_subprocess_args(input_arg, outdir_arg, force, multiqc_arg)
